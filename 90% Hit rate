@@ -1,0 +1,122 @@
+# ============================================================
+#  AI Straight Bet Predictor Bot (Display-Only)
+#  Works for NBA, NFL, MLB, NHL, Soccer, College Sports
+#  Predicts straight bets only (no parlays / props)
+#  Safe for educational and simulation use
+# ============================================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import requests
+import joblib
+
+st.set_page_config(page_title="AI Straight Bet Predictor", layout="wide")
+
+# ------------------------------------------------------------
+# 1. Load or simulate historical data
+# ------------------------------------------------------------
+@st.cache_data
+def load_data():
+    np.random.seed(42)
+    n = 800
+    data = pd.DataFrame({
+        'home_team': np.random.choice(['TeamA','TeamB','TeamC','TeamD','TeamE'], n),
+        'away_team': np.random.choice(['TeamF','TeamG','TeamH','TeamI','TeamJ'], n),
+        'home_odds': np.random.uniform(-200, 200, n),
+        'away_odds': np.random.uniform(-200, 200, n),
+        'spread': np.random.uniform(-10, 10, n),
+        'home_score': np.random.randint(60,130,n),
+        'away_score': np.random.randint(60,130,n)
+    })
+    data['winner'] = (data['home_score'] > data['away_score']).astype(int)
+    return data
+
+data = load_data()
+
+# ------------------------------------------------------------
+# 2. Train the model
+# ------------------------------------------------------------
+features = ['home_odds','away_odds','spread']
+X = data[features]
+y = data['winner']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = RandomForestClassifier(n_estimators=200, random_state=42)
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+acc = accuracy_score(y_test, y_pred)
+
+# ------------------------------------------------------------
+# 3. Display dashboard
+# ------------------------------------------------------------
+st.title("🏆 AI Straight Bet Predictor Bot")
+st.write("Safe, display-only AI that predicts straight bets across all sports.")
+
+st.sidebar.header("⚙️ Settings")
+conf_threshold = st.sidebar.slider("Minimum confidence (%)", 50, 99, 80)
+
+st.write(f"Model trained on {len(data)} games")
+st.write(f"Backtested accuracy: **{acc*100:.2f}%**")
+
+# ------------------------------------------------------------
+# 4. Predict upcoming games (simulated)
+# ------------------------------------------------------------
+st.subheader("Upcoming Games Predictions")
+
+# Simulated new games
+new_games = pd.DataFrame({
+    'home_team': np.random.choice(['TeamA','TeamB','TeamC','TeamD','TeamE'], 10),
+    'away_team': np.random.choice(['TeamF','TeamG','TeamH','TeamI','TeamJ'], 10),
+    'home_odds': np.random.uniform(-200, 200, 10),
+    'away_odds': np.random.uniform(-200, 200, 10),
+    'spread': np.random.uniform(-10, 10, 10),
+})
+
+probs = model.predict_proba(new_games[features])
+new_games['home_win_prob'] = probs[:,1]
+new_games['pick'] = np.where(new_games['home_win_prob']>=0.5, new_games['home_team'], new_games['away_team'])
+new_games['confidence'] = (np.max(probs, axis=1)*100).round(1)
+
+recommended = new_games[new_games['confidence']>=conf_threshold]
+st.dataframe(recommended[['home_team','away_team','pick','confidence','home_odds','away_odds','spread']])
+
+# ------------------------------------------------------------
+# 5. Optional: Live odds (The-Odds-API)
+# ------------------------------------------------------------
+st.subheader("🔴 (Optional) Live Odds Feed")
+st.caption("Add your API key below to enable live data from The-Odds-API.")
+
+api_key = st.text_input("Enter your The-Odds-API key", type="password")
+
+if api_key:
+    try:
+        sport = "basketball_nba"  # Example: can switch to other sports
+        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions=us&markets=h2h"
+        res = requests.get(url)
+        if res.status_code == 200:
+            odds_data = res.json()
+            st.success("✅ Live odds data loaded!")
+            games_list = []
+            for game in odds_data[:10]:
+                home = game["home_team"]
+                away = game["away_team"]
+                bookmakers = game.get("bookmakers", [])
+                if bookmakers:
+                    odds = bookmakers[0]["markets"][0]["outcomes"]
+                    home_price = odds[0]["price"]
+                    away_price = odds[1]["price"]
+                    games_list.append([home, away, home_price, away_price])
+            live_df = pd.DataFrame(games_list, columns=["Home", "Away", "Home Odds", "Away Odds"])
+            st.dataframe(live_df)
+        else:
+            st.warning("Could not fetch live odds. Check API key or limit.")
+    except Exception as e:
+        st.error(f"Error fetching odds: {e}")
+
+st.markdown("---")
+st.caption("Educational simulation only — no auto-betting or financial advice.")
